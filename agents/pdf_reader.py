@@ -43,6 +43,13 @@ class PDFReaderTool(BaseTool):
             }
         }
         
+        # Define month map at the beginning
+        month_map = {
+            'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
+            'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
+            'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+        }
+        
         # Regular expressions for different financial patterns
         patterns = {
             "amount": r'\$[\d,]+\.?\d*|\d+\.\d{2}',
@@ -51,7 +58,7 @@ class PDFReaderTool(BaseTool):
             "balance": r'(?:balance|total|amount due|payment due).*?(?:\$[\d,]+\.?\d*|\d+\.\d{2})',
             "account": r'(?:account|acct|card).*?(?:\d{4}|\d{10,})',
             "holder": r'(?:holder|name|cardholder):\s*([A-Za-z\s]+)',
-            "period": r'(?:period|statement|from).*?(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}).*?(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})',
+            "period": r'(?:Statement Period:|Period:|From:|Statement from:).*?(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\w{3}\s+\d{1,2}).*?(?:to|through|-).*?(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\w{3}\s+\d{1,2})',
             "credit_card": r'(?:credit card|visa|mastercard|amex|discover|capital one)',
             "transaction_line": r'(\w{3}\s+\d{1,2})\s+(\w{3}\s+\d{1,2})\s+([A-Za-z0-9\s\-\.,&\'*]+?)(?:\s+\$[\d,]+\.?\d*|\s+\d+\.\d{2})*\s+(\$[\d,]+\.?\d*|\d+\.\d{2})',
             "payment": r'(?:payment|credit|refund|credit adjustment)',
@@ -62,11 +69,102 @@ class PDFReaderTool(BaseTool):
         # Determine if this is a credit card statement
         is_credit_card = bool(re.search(patterns["credit_card"], text, re.IGNORECASE))
         
-        # Extract statement period
-        period_match = re.search(patterns["period"], text, re.IGNORECASE)
+        # Try different patterns for statement period
+        period_patterns = [
+            # Credit card statement patterns (add these first)
+            r'(\w{3}\s+\d{1,2},\s+\d{4})\s*-\s*(\w{3}\s+\d{1,2},\s+\d{4})',  # Billing cycle format
+            r'Statement\s+Date:\s*(\d{1,2}/\d{1,2}/\d{2,4})',  # Alternative format
+            r'(?:As of|Date:)\s*(\d{1,2}/\d{1,2}/\d{2,4})',  # Another alternative format
+            # Bank statement specific patterns
+            r'(\w+)\s+(\d{4})STATEMENT\s+PERIOD\s*(\w{3}\s+\d{1,2})\s*-\s*(\w{3}\s+\d{1,2},\s*\d{4})',
+            # General patterns
+            r'(?:Statement Period:|Period:|From:|Statement from:).*?(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\w{3}\s+\d{1,2}).*?(?:to|through|-).*?(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\w{3}\s+\d{1,2})',
+            r'Statement\s+Period:\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\w{3}\s+\d{1,2})\s*(?:to|through|-)\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\w{3}\s+\d{1,2})',
+            r'(?:From|Period):\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\w{3}\s+\d{1,2})\s*(?:to|through|-)\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\w{3}\s+\d{1,2})',
+            r'(?:For the period|Period covered):\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\w{3}\s+\d{1,2})\s*(?:to|through|-)\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\w{3}\s+\d{1,2})',
+            r'(?:Beginning|Start) Balance as of\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\w{3}\s+\d{1,2})',
+            r'(?:Ending|Closing) Balance as of\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\w{3}\s+\d{1,2})',
+            r'(?:Statement for|Period):\s*(\w{3,})\s+(\d{4})',
+            r'(?:Month of|Period):\s*(\w{3,})\s+(\d{4})'
+        ]
+        
+        # Print the text content for debugging
+        print("\nSearching for statement period in text:")
+        print(text[:500])  # Print first 500 characters
+        
+        for pattern in period_patterns:
+            period_match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+            if period_match:
+                print(f"\nMatched pattern: {pattern}")
+                print(f"Groups: {period_match.groups()}")
+                break
+                
         if period_match:
-            financial_data["statement_period"]["start_date"] = period_match.group(1)
-            financial_data["statement_period"]["end_date"] = period_match.group(2)
+            # Initialize statement period dictionary if not exists
+            if "statement_period" not in financial_data:
+                financial_data["statement_period"] = {"start_date": "", "end_date": ""}
+            
+            # Format dates consistently
+            def format_date(date_str):
+                try:
+                    # Remove any commas and extra spaces
+                    date_str = date_str.replace(',', '').strip()
+                    
+                    # Handle bank statement format (e.g., "Feb 28 2025")
+                    if any(month in date_str for month in month_map.keys()):
+                        parts = date_str.split()
+                        if len(parts) == 2:  # Format: "Feb 28"
+                            month, day = parts
+                            return f"{month_map[month[:3]]}/{day.zfill(2)}/2025"
+                        elif len(parts) == 3:  # Format: "Feb 28 2025"
+                            month, day, year = parts
+                            return f"{month_map[month[:3]]}/{day.zfill(2)}/{year}"
+                    elif '/' in date_str or '-' in date_str:
+                        # Handle numeric dates
+                        separator = '/' if '/' in date_str else '-'
+                        parts = date_str.split(separator)
+                        if len(parts) >= 2:
+                            month, day = parts[:2]
+                            year = parts[2] if len(parts) > 2 else '2025'
+                            if len(year) == 2:
+                                year = '20' + year
+                            return f"{month.zfill(2)}/{day.zfill(2)}/{year}"
+                    return date_str
+                except Exception as e:
+                    print(f"Error formatting date {date_str}: {str(e)}")
+                    return date_str
+            
+            # Format the dates based on the pattern matched
+            if len(period_match.groups()) == 4:  # Bank statement format: Month Year + start + end date
+                month, year = period_match.group(1), period_match.group(2)
+                start_date = f"{period_match.group(3)} {year}"
+                end_date = period_match.group(4)
+            elif len(period_match.groups()) == 2:  # Date range format (including credit card billing cycle)
+                start_date = period_match.group(1)
+                end_date = period_match.group(2)
+            else:  # Single date format
+                # For credit card statements, use the statement date as the end date
+                # and calculate the start date as the first day of the month
+                end_date = period_match.group(1)
+                if '/' in end_date:
+                    month, day, year = end_date.split('/')
+                    start_date = f"{month}/01/{year}"
+                else:
+                    start_date = end_date  # Fallback if date format is unexpected
+            
+            financial_data["statement_period"]["start_date"] = format_date(start_date)
+            financial_data["statement_period"]["end_date"] = format_date(end_date)
+            
+            # Print debug information
+            print(f"\nExtracted statement period:")
+            print(f"Start date: {financial_data['statement_period']['start_date']}")
+            print(f"End date: {financial_data['statement_period']['end_date']}")
+        else:
+            print("\nWarning: Could not extract statement period")
+            financial_data["statement_period"] = {
+                "start_date": "Not found",
+                "end_date": "Not found"
+            }
         
         # Extract account information
         account_match = re.search(patterns["account"], text, re.IGNORECASE)
@@ -282,8 +380,16 @@ class PDFReaderTool(BaseTool):
             # Remove any quotes from the file path
             file_path = file_path.strip("'\"")
             
+            # Store the file name and path
+            metadata = {
+                "file_path": file_path,
+                "file_name": os.path.basename(file_path),
+                "num_pages": 0
+            }
+            
             with open(file_path, 'rb') as file:
                 pdf_reader = PdfReader(file)
+                metadata["num_pages"] = len(pdf_reader.pages)
                 text_content = ""
                 for page in pdf_reader.pages:
                     text_content += page.extract_text() + "\n"
@@ -316,24 +422,23 @@ class PDFReaderTool(BaseTool):
                 # Return structured data
                 return {
                     "raw_text": text_content,
-                    "metadata": {
-                        "num_pages": len(pdf_reader.pages),
-                        "file_name": os.path.basename(file_path)
-                    },
-                    "analysis": {
-                        "statement_period": financial_data["statement_period"],
-                        "account_info": financial_data["account_info"],
-                        "balance_info": financial_data["balance_info"],
-                        "transactions": financial_data["transactions"],
-                        "balances": financial_data["balances"],
-                        "categories": list(financial_data["categories"]),
-                        "summary": {
-                            "total_income": total_income,
-                            "total_expenses": total_expenses,
-                            "net_cash_flow": total_income - total_expenses,
-                            "income_by_category": income_by_category,
-                            "expense_by_category": expense_by_category,
-                            "recurring_items": recurring_items
+                    "metadata": metadata,
+                    "output": {
+                        "analysis": {
+                            "statement_period": financial_data["statement_period"],
+                            "account_info": financial_data["account_info"],
+                            "balance_info": financial_data["balance_info"],
+                            "transactions": financial_data["transactions"],
+                            "balances": financial_data["balances"],
+                            "categories": list(financial_data["categories"]),
+                            "summary": {
+                                "total_income": total_income,
+                                "total_expenses": total_expenses,
+                                "net_cash_flow": total_income - total_expenses,
+                                "income_by_category": income_by_category,
+                                "expense_by_category": expense_by_category,
+                                "recurring_items": recurring_items
+                            }
                         }
                     }
                 }
@@ -351,6 +456,8 @@ class PDFReaderAgent:
             model="gpt-4-turbo-preview",
             api_key=os.getenv("OPENAI_API_KEY")
         )
+        
+        self.tool = PDFReaderTool()
         
         self.prompt = ChatPromptTemplate.from_messages([
             SystemMessage(content=(
@@ -411,9 +518,8 @@ class PDFReaderAgent:
     def analyze_pdf(self, file_path: str) -> Dict:
         """Analyze a PDF file using the agent."""
         try:
-            # First, read the PDF content directly
-            tool = PDFReaderTool()
-            pdf_data = tool._run(file_path)
+            # First, read the PDF content directly using the tool
+            pdf_data = self.tool._run(file_path)
             
             # Extract text content for analysis
             text_content = pdf_data.get("raw_text", "")
@@ -435,7 +541,8 @@ class PDFReaderAgent:
             return {
                 "status": "success",
                 "data": {
-                    "output": pdf_data,
+                    "metadata": pdf_data["metadata"],
+                    "output": pdf_data["output"],
                     "insights": analysis
                 }
             }

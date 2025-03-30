@@ -8,63 +8,60 @@ import json
 from datetime import datetime
 
 def process_files(input_path: str, output_dir: str) -> None:
-    """Process PDF files and generate a report."""
-    # Create output directory if it doesn't exist
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Initialize tools and agents
-    pdf_reader = PDFReaderAgent()
-    report_generator = ReportGeneratorAgent()
-    
-    # List to store analysis results
-    analyses = []
-    
-    # Handle both directory and single file inputs
-    if os.path.isdir(input_path):
-        # Process all PDF files in directory
-        for file in os.listdir(input_path):
-            if file.endswith('.pdf'):
-                file_path = os.path.join(input_path, file)
-                try:
-                    print(f"\nProcessing PDF file: {file_path}")
-                    result = pdf_reader.analyze_pdf(file_path)
-                    if result["status"] == "success":
-                        analyses.append(result["data"])
-                    else:
-                        print(f"Error processing {file}: {result.get('error', 'Unknown error')}")
-                except Exception as e:
-                    print(f"Error processing {file}: {str(e)}")
-    else:
-        # Process single PDF file
-        if input_path.endswith('.pdf'):
+    """Process PDF files and generate a combined report."""
+    try:
+        # Create output directory if it doesn't exist
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Initialize tools
+        pdf_reader = PDFReaderAgent()
+        report_generator = ReportGeneratorAgent()
+        
+        # Get list of PDF files
+        if os.path.isfile(input_path):
+            pdf_files = [input_path]
+        else:
+            pdf_files = [os.path.join(input_path, f) for f in os.listdir(input_path) if f.lower().endswith('.pdf')]
+        
+        # Sort files by date (newest first)
+        pdf_files.sort(reverse=True)
+        
+        # Process each PDF file
+        analyses = []
+        for pdf_file in pdf_files:
+            print(f"\nProcessing PDF file: {pdf_file}")
             try:
-                print(f"\nProcessing PDF file: {input_path}")
-                result = pdf_reader.analyze_pdf(input_path)
+                # Read and analyze PDF
+                result = pdf_reader.analyze_pdf(pdf_file)
                 if result["status"] == "success":
                     analyses.append(result["data"])
                 else:
-                    print(f"Error processing file: {result.get('error', 'Unknown error')}")
+                    print(f"Error processing {pdf_file}: {result.get('error', 'Unknown error')}")
             except Exception as e:
-                print(f"Error processing file: {str(e)}")
-        else:
-            print("Error: Input file must be a PDF file")
+                print(f"Error processing {pdf_file}: {str(e)}")
+                continue
+        
+        if not analyses:
+            print("No valid analyses to combine.")
             return
-    
-    if not analyses:
-        print("No files were successfully processed")
-        return
-    
-    print("\nPerforming combined analysis...")
-    
-    # Generate report
-    try:
-        print("\nGenerating report...")
+        
+        print("\nPerforming combined analysis...")
+        
+        # Generate timestamp for output file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        report_path = os.path.join(output_dir, f"financial_report_{timestamp}.pdf")
-        report_generator.generate_report(analyses, report_path)
-        print(f"\nAnalysis complete! Report generated at: {report_path}")
+        output_file = os.path.join(output_dir, f"financial_report_{timestamp}.pdf")
+        
+        print("\nGenerating report...")
+        report_result = report_generator.generate_report(analyses, output_file)
+        
+        if report_result["status"] == "success":
+            print(f"\nAnalysis complete! Report generated at: {output_file}")
+        else:
+            print(f"\nError generating report: {report_result.get('error', 'Unknown error')}")
+            
     except Exception as e:
-        print(f"Error generating report: {str(e)}")
+        print(f"Error in process_files: {str(e)}")
+        raise
 
 def main():
     parser = argparse.ArgumentParser(description="Process financial documents and generate analysis report")

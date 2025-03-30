@@ -64,12 +64,375 @@ class ReportGeneratorTool(BaseTool):
             elements.append(title)
             elements.append(Spacer(1, 12))
             
+            # Debug: Print analyses structure
+            print("\nAnalyses structure:")
+            for i, analysis in enumerate(analyses):
+                print(f"\nAnalysis {i+1}:")
+                print(f"Keys: {analysis.keys()}")
+                if "metadata" in analysis:
+                    print(f"Metadata: {analysis['metadata']}")
+                if "output" in analysis:
+                    print(f"Output keys: {analysis['output'].keys()}")
+                    if "analysis" in analysis["output"]:
+                        print(f"Analysis keys: {analysis['output']['analysis'].keys()}")
+            
             # Source Files
             elements.append(Paragraph("Source Files", styles["Heading2"]))
             for analysis in analyses:
-                if "metadata" in analysis:
-                    elements.append(Paragraph(f"• {analysis['metadata']['file_name']}", styles["Normal"]))
+                if "metadata" in analysis and "file_name" in analysis["metadata"]:
+                    file_name = analysis["metadata"]["file_name"]
+                    elements.append(Paragraph(f"• {file_name}", styles["Normal"]))
             elements.append(Spacer(1, 12))
+            
+            # Statement Periods
+            elements.append(Paragraph("Statement Periods", styles["Heading2"]))
+            for analysis in analyses:
+                if "output" in analysis and "analysis" in analysis["output"]:
+                    data = analysis["output"]["analysis"]
+                    if "statement_period" in data and "metadata" in analysis:
+                        period = data["statement_period"]
+                        file_name = analysis["metadata"]["file_name"]
+                        start_date = period.get('start_date', '')
+                        end_date = period.get('end_date', '')
+                        
+                        elements.append(Paragraph(f"• {file_name}:", styles["Heading3"]))
+                        if start_date:
+                            elements.append(Paragraph(f"  From: {start_date}", styles["Normal"]))
+                        if end_date:
+                            elements.append(Paragraph(f"  To: {end_date}", styles["Normal"]))
+                        elements.append(Spacer(1, 6))
+            elements.append(Spacer(1, 12))
+            
+            # Financial Analysis
+            elements.append(Paragraph("Financial Analysis", styles["Heading2"]))
+            
+            # Separate credit card and bank statements
+            credit_card_analyses = []
+            bank_analyses = []
+            
+            for analysis in analyses:
+                if "output" in analysis and "analysis" in analysis["output"]:
+                    data = analysis["output"]["analysis"]
+                    # Check if it's a credit card statement by looking for credit card specific fields
+                    if "balance_info" in data and "previous_balance" in data["balance_info"]:
+                        credit_card_analyses.append(analysis)
+                    else:
+                        bank_analyses.append(analysis)
+            
+            # Credit Card Statement Comparison
+            if credit_card_analyses:
+                elements.append(Paragraph("Credit Card Statement Comparison", styles["Heading3"]))
+                elements.append(Spacer(1, 6))
+                
+                # Prepare credit card comparison data
+                cc_comparison_data = [["Metric"]]
+                cc_statement_data = []
+                
+                for analysis in credit_card_analyses:
+                    data = analysis["output"]["analysis"]
+                    period = data["statement_period"]
+                    end_date = period.get("end_date", "Unknown")
+                    cc_comparison_data[0].append(end_date)
+                    
+                    balance_info = data["balance_info"]
+                    statement_metrics = {
+                        "Purchases": float(balance_info.get("purchases", 0)),
+                        "Payments": float(balance_info.get("payments", 0)),
+                        "New Balance": float(balance_info.get("new_balance", 0)),
+                        "Interest": float(balance_info.get("interest", 0)),
+                        "Fees": float(balance_info.get("fees", 0)),
+                        "Cash Advances": float(balance_info.get("cash_advances", 0))
+                    }
+                    cc_statement_data.append(statement_metrics)
+                
+                # Create rows for credit card metrics
+                cc_metrics = ["Purchases", "Payments", "New Balance", "Interest", "Fees", "Cash Advances"]
+                for metric in cc_metrics:
+                    row = [metric]
+                    for statement in cc_statement_data:
+                        row.append(f"${statement.get(metric, 0):,.2f}")
+                    cc_comparison_data.append(row)
+                
+                # Add month-over-month changes for credit cards
+                if len(cc_statement_data) > 1:
+                    for metric in cc_metrics:
+                        row = [f"{metric} Change %"]
+                        for i in range(len(cc_statement_data)):
+                            if i == 0:
+                                row.append("N/A")
+                            else:
+                                current = cc_statement_data[i].get(metric, 0)
+                                previous = cc_statement_data[i-1].get(metric, 0)
+                                if previous != 0:
+                                    change = ((current - previous) / previous) * 100
+                                    row.append(f"{'↑' if change > 0 else '↓'}{abs(change):.1f}%")
+                                else:
+                                    row.append("N/A")
+                        cc_comparison_data.append(row)
+                
+                # Create and style the credit card comparison table
+                cc_table = Table(cc_comparison_data)
+                cc_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 12),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 10),
+                    ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+                    ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                    ('TOPPADDING', (0, 0), (-1, -1), 4),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ]))
+                elements.append(cc_table)
+                elements.append(Spacer(1, 12))
+            
+            # Bank Statement Comparison
+            if bank_analyses:
+                elements.append(Paragraph("Bank Statement Comparison", styles["Heading3"]))
+                elements.append(Spacer(1, 6))
+                
+                # Prepare bank comparison data
+                bank_comparison_data = [["Metric"]]
+                bank_statement_data = []
+                
+                for analysis in bank_analyses:
+                    data = analysis["output"]["analysis"]
+                    period = data["statement_period"]
+                    end_date = period.get("end_date", "Unknown")
+                    bank_comparison_data[0].append(end_date)
+                    
+                    balance_info = data["balance_info"]
+                    statement_metrics = {
+                        "Opening Balance": float(balance_info.get("opening", 0)),
+                        "Closing Balance": float(balance_info.get("closing", 0)),
+                        "Net Change": float(balance_info.get("change", 0)),
+                        "Deposits": float(balance_info.get("deposits", 0)),
+                        "Withdrawals": float(balance_info.get("withdrawals", 0))
+                    }
+                    bank_statement_data.append(statement_metrics)
+                
+                # Create rows for bank metrics
+                bank_metrics = ["Opening Balance", "Closing Balance", "Net Change", "Deposits", "Withdrawals"]
+                for metric in bank_metrics:
+                    row = [metric]
+                    for statement in bank_statement_data:
+                        row.append(f"${statement.get(metric, 0):,.2f}")
+                    bank_comparison_data.append(row)
+                
+                # Add month-over-month changes for bank statements
+                if len(bank_statement_data) > 1:
+                    for metric in bank_metrics:
+                        row = [f"{metric} Change %"]
+                        for i in range(len(bank_statement_data)):
+                            if i == 0:
+                                row.append("N/A")
+                            else:
+                                current = bank_statement_data[i].get(metric, 0)
+                                previous = bank_statement_data[i-1].get(metric, 0)
+                                if previous != 0:
+                                    change = ((current - previous) / previous) * 100
+                                    row.append(f"{'↑' if change > 0 else '↓'}{abs(change):.1f}%")
+                                else:
+                                    row.append("N/A")
+                        bank_comparison_data.append(row)
+                
+                # Create and style the bank comparison table
+                bank_table = Table(bank_comparison_data)
+                bank_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 12),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 10),
+                    ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+                    ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                    ('TOPPADDING', (0, 0), (-1, -1), 4),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ]))
+                elements.append(bank_table)
+                elements.append(Spacer(1, 12))
+            
+            # Add insights about the comparison
+            elements.append(Paragraph("Key Insights:", styles["Heading3"]))
+            
+            # Calculate and add insights for credit cards
+            if credit_card_analyses:
+                elements.append(Paragraph("Credit Card Insights:", styles["Heading4"]))
+                cc_insights = []
+                
+                # Analyze credit card trends
+                if len(cc_statement_data) > 1:
+                    # Spending pattern
+                    total_purchases = sum(data.get("Purchases", 0) for data in cc_statement_data)
+                    avg_purchases = total_purchases / len(cc_statement_data)
+                    latest_purchases = cc_statement_data[0].get("Purchases", 0)
+                    if latest_purchases > avg_purchases:
+                        cc_insights.append(f"• Recent purchases (${latest_purchases:,.2f}) are above the {len(cc_statement_data)}-month average of ${avg_purchases:,.2f}")
+                    else:
+                        cc_insights.append(f"• Recent purchases (${latest_purchases:,.2f}) are below the {len(cc_statement_data)}-month average of ${avg_purchases:,.2f}")
+                    
+                    # Payment behavior
+                    total_payments = sum(data.get("Payments", 0) for data in cc_statement_data)
+                    payment_ratio = total_payments / total_purchases if total_purchases > 0 else 0
+                    if payment_ratio > 1:
+                        cc_insights.append(f"• Strong payment behavior: Payments exceed purchases by {((payment_ratio - 1) * 100):.1f}%")
+                    elif payment_ratio > 0.9:
+                        cc_insights.append("• Good payment behavior: Most purchases are being paid off")
+                    else:
+                        cc_insights.append(f"• Warning: Payments cover only {(payment_ratio * 100):.1f}% of purchases")
+                    
+                    # Interest and fees
+                    total_interest = sum(data.get("Interest", 0) for data in cc_statement_data)
+                    total_fees = sum(data.get("Fees", 0) for data in cc_statement_data)
+                    if total_interest > 0 or total_fees > 0:
+                        cc_insights.append(f"• Total interest and fees paid: ${(total_interest + total_fees):,.2f}")
+                    
+                    # Balance trend
+                    first_balance = cc_statement_data[-1].get("New Balance", 0)
+                    latest_balance = cc_statement_data[0].get("New Balance", 0)
+                    balance_change = ((latest_balance - first_balance) / first_balance * 100) if first_balance != 0 else 0
+                    if balance_change > 0:
+                        cc_insights.append(f"• Balance has increased by {balance_change:.1f}% over the period")
+                    else:
+                        cc_insights.append(f"• Balance has decreased by {abs(balance_change):.1f}% over the period")
+                
+                for insight in cc_insights:
+                    elements.append(Paragraph(insight, styles["Normal"]))
+                elements.append(Spacer(1, 6))
+            
+            # Calculate and add insights for bank statements
+            if bank_analyses:
+                elements.append(Paragraph("Bank Account Insights:", styles["Heading4"]))
+                bank_insights = []
+                
+                # Analyze bank account trends
+                if len(bank_statement_data) > 1:
+                    # Balance trend
+                    first_balance = bank_statement_data[-1].get("Opening Balance", 0)
+                    latest_balance = bank_statement_data[0].get("Closing Balance", 0)
+                    balance_change = ((latest_balance - first_balance) / first_balance * 100) if first_balance != 0 else 0
+                    if balance_change > 0:
+                        bank_insights.append(f"• Account balance has increased by {balance_change:.1f}% over the period")
+                    else:
+                        bank_insights.append(f"• Account balance has decreased by {abs(balance_change):.1f}% over the period")
+                    
+                    # Deposit and withdrawal analysis
+                    total_deposits = sum(data.get("Deposits", 0) for data in bank_statement_data)
+                    total_withdrawals = sum(data.get("Withdrawals", 0) for data in bank_statement_data)
+                    if total_deposits > 0 or total_withdrawals > 0:
+                        bank_insights.append(f"• Total deposits: ${total_deposits:,.2f}")
+                        bank_insights.append(f"• Total withdrawals: ${total_withdrawals:,.2f}")
+                        if total_deposits > total_withdrawals:
+                            bank_insights.append("• Net positive cash flow from deposits")
+                        else:
+                            bank_insights.append("• Net negative cash flow from withdrawals")
+                
+                for insight in bank_insights:
+                    elements.append(Paragraph(insight, styles["Normal"]))
+                elements.append(Spacer(1, 12))
+            
+            # Calculate trends
+            total_purchases = []
+            total_payments = []
+            balances = []
+            dates = []
+            
+            for analysis in analyses:
+                if "output" in analysis and "analysis" in analysis["output"]:
+                    data = analysis["output"]["analysis"]
+                    if "balance_info" in data:
+                        balance_info = data["balance_info"]
+                        if all(key in balance_info for key in ["purchases", "payments", "new_balance"]):
+                            total_purchases.append(float(balance_info["purchases"]))
+                            total_payments.append(float(balance_info["payments"]))
+                            balances.append(float(balance_info["new_balance"]))
+                            if "statement_period" in data:
+                                dates.append(data["statement_period"].get("end_date", "Unknown"))
+            
+            # Calculate trends only if we have valid data
+            if len(total_purchases) > 1:
+                # Calculate month-over-month percentage changes
+                purchase_changes = []
+                payment_changes = []
+                balance_changes = []
+                
+                for i in range(len(total_purchases)-1):
+                    # Calculate percentage change: (current - previous) / previous * 100
+                    if total_purchases[i+1] != 0:
+                        purchase_change = ((total_purchases[i] - total_purchases[i+1]) / total_purchases[i+1]) * 100
+                        purchase_changes.append(purchase_change)
+                    
+                    if total_payments[i+1] != 0:
+                        payment_change = ((total_payments[i] - total_payments[i+1]) / total_payments[i+1]) * 100
+                        payment_changes.append(payment_change)
+                    
+                    if balances[i+1] != 0:
+                        balance_change = ((balances[i] - balances[i+1]) / balances[i+1]) * 100
+                        balance_changes.append(balance_change)
+                
+                # Calculate average trends
+                purchase_trend = sum(purchase_changes) / len(purchase_changes) if purchase_changes else 0
+                payment_trend = sum(payment_changes) / len(payment_changes) if payment_changes else 0
+                balance_trend = sum(balance_changes) / len(balance_changes) if balance_changes else 0
+                
+                elements.append(Paragraph("Trend Analysis:", styles["Heading3"]))
+                elements.append(Paragraph(f"• Purchase Trend: {'↑' if purchase_trend > 0 else '↓'} {abs(purchase_trend):.1f}%", styles["Normal"]))
+                elements.append(Paragraph(f"• Payment Trend: {'↑' if payment_trend > 0 else '↓'} {abs(payment_trend):.1f}%", styles["Normal"]))
+                elements.append(Paragraph(f"• Balance Trend: {'↑' if balance_trend > 0 else '↓'} {abs(balance_trend):.1f}%", styles["Normal"]))
+                elements.append(Spacer(1, 12))
+            
+            # Add summary statistics
+            elements.append(Paragraph("Summary Statistics:", styles["Heading3"]))
+            for analysis in analyses:
+                if "output" in analysis and "analysis" in analysis["output"]:
+                    data = analysis["output"]["analysis"]
+                    if "summary" in data:
+                        summary = data["summary"]
+                        elements.append(Paragraph(f"• Total Income: ${summary.get('total_income', 0):,.2f}", styles["Normal"]))
+                        elements.append(Paragraph(f"• Total Expenses: ${summary.get('total_expenses', 0):,.2f}", styles["Normal"]))
+                        elements.append(Paragraph(f"• Net Cash Flow: ${summary.get('net_cash_flow', 0):,.2f}", styles["Normal"]))
+                        elements.append(Spacer(1, 6))
+            
+            # Category Analysis
+            elements.append(Paragraph("Category Analysis", styles["Heading2"]))
+            category_totals = {}
+            
+            for analysis in analyses:
+                if "output" in analysis and "analysis" in analysis["output"]:
+                    data = analysis["output"]["analysis"]
+                    if "transactions" in data:
+                        for trans in data["transactions"]:
+                            category = trans.get("category", "other")
+                            amount = trans.get("amount", 0)
+                            category_totals[category] = category_totals.get(category, 0) + amount
+            
+            # Create category pie chart
+            if category_totals:
+                pie_chart = self._create_pie_chart(category_totals, "Expense Categories")
+                elements.append(pie_chart)
+                elements.append(Spacer(1, 12))
+                
+                # Add category breakdown
+                elements.append(Paragraph("Category Breakdown:", styles["Heading3"]))
+                for category, amount in sorted(category_totals.items(), key=lambda x: x[1], reverse=True):
+                    elements.append(Paragraph(f"• {category.title()}: ${amount:,.2f}", styles["Normal"]))
+                elements.append(Spacer(1, 12))
             
             # Process each analysis
             for analysis in analyses:
@@ -82,14 +445,6 @@ class ReportGeneratorTool(BaseTool):
                         account_info = data["account_info"]
                         elements.append(Paragraph(f"Account Number: {account_info.get('account_number', 'N/A')}", styles["Normal"]))
                         elements.append(Paragraph(f"Account Holder: {account_info.get('holder_name', 'N/A')}", styles["Normal"]))
-                        elements.append(Spacer(1, 12))
-                    
-                    # Statement Period
-                    if "statement_period" in data:
-                        elements.append(Paragraph("Statement Period", styles["Heading2"]))
-                        period = data["statement_period"]
-                        elements.append(Paragraph(f"From: {period.get('start_date', 'N/A')}", styles["Normal"]))
-                        elements.append(Paragraph(f"To: {period.get('end_date', 'N/A')}", styles["Normal"]))
                         elements.append(Spacer(1, 12))
                     
                     # Balance Information
