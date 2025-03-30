@@ -17,11 +17,24 @@ def process_files(input_path: str, output_dir: str) -> None:
         pdf_reader = PDFReaderAgent()
         report_generator = ReportGeneratorAgent()
         
-        # Get list of PDF files
-        if os.path.isfile(input_path):
-            pdf_files = [input_path]
-        else:
-            pdf_files = [os.path.join(input_path, f) for f in os.listdir(input_path) if f.lower().endswith('.pdf')]
+        # Get list of PDF files from both CC and Bank directories
+        pdf_files = []
+        
+        # Process CC directory
+        cc_dir = os.path.join(input_path, "CC")
+        if os.path.exists(cc_dir):
+            cc_files = [os.path.join(cc_dir, f) for f in os.listdir(cc_dir) if f.lower().endswith('.pdf')]
+            pdf_files.extend(cc_files)
+        
+        # Process Bank directory
+        bank_dir = os.path.join(input_path, "Bank")
+        if os.path.exists(bank_dir):
+            bank_files = [os.path.join(bank_dir, f) for f in os.listdir(bank_dir) if f.lower().endswith('.pdf')]
+            pdf_files.extend(bank_files)
+        
+        if not pdf_files:
+            print(f"No PDF files found in {input_path}/CC or {input_path}/Bank")
+            return
         
         # Sort files by date (newest first)
         pdf_files.sort(reverse=True)

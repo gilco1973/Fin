@@ -27,6 +27,7 @@ class PDFReaderTool(BaseTool):
             "statement_period": {"start_date": "", "end_date": ""},
             "account_info": {"account_number": "", "holder_name": ""},
             "balance_info": {
+                "accounts": [],
                 "previous_balance": 0,
                 "payments": 0,
                 "other_credits": 0,
@@ -181,11 +182,13 @@ class PDFReaderTool(BaseTool):
         for line in lines:
             # Check for section headers
             section_match = re.search(patterns["section_header"], line, re.IGNORECASE)
-            if section_match:
-                section_name = section_match.group().lower()
+            if section_match or "Account Summary" in line or "ACCOUNT NAME" in line:
+                section_name = section_match.group().lower() if section_match else "account_summary"
                 # Map section names to internal keys
-                if "account summary" in section_name:
+                if "account summary" in section_name.lower():
                     current_section = "account_summary"
+                    # Skip the next line if it's a header row
+                    continue
                 elif "payments" in section_name:
                     current_section = "payments_credits"
                 elif "transactions" in section_name:
@@ -212,10 +215,45 @@ class PDFReaderTool(BaseTool):
             # Handle Account Summary section
             if current_section == "account_summary":
                 line_lower = line.lower()
-                # Skip percentage lines and summary headers
-                if '%' in line or any(word in line_lower for word in ['purchases', 'cash advances', 'fees', 'interest']):
-                    continue
+                
+                # Check for bank statement account summary format
+                # Pattern for "360 Checking...9681 $1,197.40 $3,379.10" format
+                account_match = re.search(r'360\s+(?:Checking|Performance\s+Savings)\.{3}(\d{4})\s+\$([\d,]+\.\d{2})\s+\$([\d,]+\.\d{2})', line)
+                if account_match:
+                    print(f"\nMatched account line: {line}")
+                    print(f"Groups: {account_match.groups()}")
+                    account_number = account_match.group(1)
+                    opening_balance = float(account_match.group(2).replace(',', ''))
+                    closing_balance = float(account_match.group(3).replace(',', ''))
                     
+                    account_info = {
+                        "account_number": account_number,
+                        "opening": opening_balance,
+                        "closing": closing_balance,
+                        "change": closing_balance - opening_balance
+                    }
+                    print(f"Account info: {json.dumps(account_info, indent=2)}")
+                    financial_data["balance_info"]["accounts"].append(account_info)
+                    continue
+                
+                # Check for "All Accounts" summary line
+                all_accounts_match = re.search(r'All\s+Accounts\s+\$([\d,]+\.\d{2})\s+\$([\d,]+\.\d{2})', line)
+                if all_accounts_match:
+                    print(f"\nMatched all accounts line: {line}")
+                    print(f"Groups: {all_accounts_match.groups()}")
+                    total_opening = float(all_accounts_match.group(1).replace(',', ''))
+                    total_closing = float(all_accounts_match.group(2).replace(',', ''))
+                    account_info = {
+                        "account_number": "total",
+                        "opening": total_opening,
+                        "closing": total_closing,
+                        "change": total_closing - total_opening
+                    }
+                    print(f"Total account info: {json.dumps(account_info, indent=2)}")
+                    financial_data["balance_info"]["accounts"].append(account_info)
+                    continue
+                
+                # Handle credit card format
                 if "previous balance" in line_lower:
                     amount_match = re.search(patterns["amount"], line)
                     if amount_match:

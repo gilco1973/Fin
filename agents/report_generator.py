@@ -111,13 +111,16 @@ class ReportGeneratorTool(BaseTool):
             bank_analyses = []
             
             for analysis in analyses:
-                if "output" in analysis and "analysis" in analysis["output"]:
-                    data = analysis["output"]["analysis"]
-                    # Check if it's a credit card statement by looking for credit card specific fields
-                    if "balance_info" in data and "previous_balance" in data["balance_info"]:
+                if "metadata" in analysis and "file_path" in analysis["metadata"]:
+                    file_path = analysis["metadata"]["file_path"]
+                    # Credit card statements are in the CC directory
+                    if "/CC/" in file_path:
                         credit_card_analyses.append(analysis)
-                    else:
+                    # Bank statements are in the Bank directory
+                    elif "/Bank/" in file_path:
                         bank_analyses.append(analysis)
+                    else:
+                        print(f"Warning: Could not determine statement type for {file_path}")
             
             # Credit Card Statement Comparison
             if credit_card_analyses:
@@ -210,13 +213,48 @@ class ReportGeneratorTool(BaseTool):
                     bank_comparison_data[0].append(end_date)
                     
                     balance_info = data["balance_info"]
+                    # Debug print to see the structure
+                    print(f"\nBank statement balance info for {analysis['metadata']['file_name']}:")
+                    print(json.dumps(balance_info, indent=2))
+                    
+                    # Extract values from the accounts data
+                    opening_balance = 0
+                    closing_balance = 0
+                    net_change = 0
+                    
+                    if "accounts" in balance_info:
+                        for account in balance_info["accounts"]:
+                            if account["account_number"] == "total":
+                                opening_balance = account["opening"]
+                                closing_balance = account["closing"]
+                                net_change = account["change"]
+                                break
+                    
+                    # Calculate deposits and withdrawals from transactions
+                    deposits = 0
+                    withdrawals = 0
+                    if "transactions" in data:
+                        for trans in data["transactions"]:
+                            try:
+                                amount = float(str(trans.get("amount", "0")).replace("$", "").replace(",", ""))
+                                if trans.get("type", "").lower() == "deposit":
+                                    deposits += amount
+                                elif trans.get("type", "").lower() == "withdrawal":
+                                    withdrawals += amount
+                            except (ValueError, AttributeError) as e:
+                                print(f"Error parsing transaction amount: {e}")
+                    
                     statement_metrics = {
-                        "Opening Balance": float(balance_info.get("opening", 0)),
-                        "Closing Balance": float(balance_info.get("closing", 0)),
-                        "Net Change": float(balance_info.get("change", 0)),
-                        "Deposits": float(balance_info.get("deposits", 0)),
-                        "Withdrawals": float(balance_info.get("withdrawals", 0))
+                        "Opening Balance": opening_balance,
+                        "Closing Balance": closing_balance,
+                        "Net Change": net_change,
+                        "Deposits": deposits,
+                        "Withdrawals": withdrawals
                     }
+                    
+                    print(f"\nExtracted metrics for {analysis['metadata']['file_name']}:")
+                    print(json.dumps(statement_metrics, indent=2))
+                    
                     bank_statement_data.append(statement_metrics)
                 
                 # Create rows for bank metrics
@@ -451,6 +489,15 @@ class ReportGeneratorTool(BaseTool):
                     if "balance_info" in data:
                         elements.append(Paragraph("Balance Information", styles["Heading2"]))
                         balance_info = data["balance_info"]
+                        
+                        # Add statement period for credit card statements
+                        if "statement_period" in data:
+                            period = data["statement_period"]
+                            start_date = period.get('start_date', '')
+                            end_date = period.get('end_date', '')
+                            if start_date and end_date:
+                                elements.append(Paragraph(f"Statement Period: {start_date} to {end_date}", styles["Normal"]))
+                                elements.append(Spacer(1, 6))
                         
                         # Create balance table data
                         balance_data = [["Item", "Amount"]]
