@@ -216,22 +216,28 @@ class PDFReaderTool(BaseTool):
             if current_section == "account_summary":
                 line_lower = line.lower()
                 
-                # Check for bank statement account summary format
-                # Pattern for "360 Checking...9681 $1,197.40 $3,379.10" format
-                account_match = re.search(r'360\s+(?:Checking|Performance\s+Savings)\.{3}(\d{4})\s+\$([\d,]+\.\d{2})\s+\$([\d,]+\.\d{2})', line)
-                if account_match:
-                    print(f"\nMatched account line: {line}")
-                    print(f"Groups: {account_match.groups()}")
-                    account_number = account_match.group(1)
-                    opening_balance = float(account_match.group(2).replace(',', ''))
-                    closing_balance = float(account_match.group(3).replace(',', ''))
+                # Match account lines
+                account_pattern = r'360\s+(?:Checking|Performance\s+Savings)\.{3}(\d{4})\s+\$([\d,]+\.\d{2})\s+\$([\d,]+\.\d{2})'
+                account_matches = re.finditer(account_pattern, line)
+                
+                for match in account_matches:
+                    account_number = match.group(1)
+                    opening = float(match.group(2).replace(',', ''))
+                    closing = float(match.group(3).replace(',', ''))
+                    change = closing - opening
                     
+                    # Skip Performance Savings account
+                    if "Performance Savings" in match.group(0):
+                        continue
+                        
                     account_info = {
                         "account_number": account_number,
-                        "opening": opening_balance,
-                        "closing": closing_balance,
-                        "change": closing_balance - opening_balance
+                        "opening": opening,
+                        "closing": closing,
+                        "change": change
                     }
+                    print(f"\nMatched account line: {match.group(0)}")
+                    print(f"Groups: {match.groups()}")
                     print(f"Account info: {json.dumps(account_info, indent=2)}")
                     financial_data["balance_info"]["accounts"].append(account_info)
                     continue
